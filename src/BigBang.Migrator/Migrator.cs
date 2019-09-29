@@ -16,6 +16,7 @@ namespace BigBang.Migrator
         private readonly ILogger<Migrator> _logger;
         private CosmosClient _client;
         private string _baseFilePath;
+        private bool _updateDBThroughput;
 
         public Migrator(ILogger<Migrator> logger)
         {
@@ -44,6 +45,7 @@ namespace BigBang.Migrator
             }
 
             _baseFilePath = options.FileLocation;
+            _updateDBThroughput = options.UpdateDBThroughput;
             return true;
         }
 
@@ -55,7 +57,7 @@ namespace BigBang.Migrator
 
             _logger.LogInformation("Starting migrations, checking database");
 
-            var cloudDatabase = await CreateOrGetDatabase(_client, requestedDatabase);
+            var cloudDatabase = await CreateOrGetDatabase(_client, requestedDatabase, _updateDBThroughput);
             
             var cloudContainers = (await cloudDatabase.GetContainerQueryIterator<ContainerProperties>().GetAll()).ToList();
 
@@ -99,7 +101,7 @@ namespace BigBang.Migrator
             return (containersToCreate, containersToUpdate, containersToDelete);
         }
 
-        private async Task<Database> CreateOrGetDatabase(CosmosClient client, MigratableDatabase requestedDatabase)
+        private async Task<Database> CreateOrGetDatabase(CosmosClient client, MigratableDatabase requestedDatabase, bool updateThroughput)
         {
             var response =
                 await client.CreateDatabaseIfNotExistsAsync(requestedDatabase.Id, requestedDatabase.Throughput);
@@ -107,8 +109,16 @@ namespace BigBang.Migrator
 
             if (response.StatusCode != HttpStatusCode.Created && requestedDatabase.Throughput.HasValue)
             {
-                _logger.LogInformation("Database already exists, replacing throughput");
-                await cloudDatabase.ReplaceThroughputAsync(requestedDatabase.Throughput.Value);
+                if (updateThroughput)
+                {
+                    _logger.LogInformation("Database already exists, replacing throughput");
+
+                    await cloudDatabase.ReplaceThroughputAsync(requestedDatabase.Throughput.Value);
+                }
+                else
+                {
+                    _logger.LogInformation("Database already exists, not updating");
+                }
             }
             else
             {
